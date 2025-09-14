@@ -1,8 +1,11 @@
 {
   "version": 2,
-  "builds": [{ "src": "api/index.py", "use": "@vercel/python" }],
+  "builds": [
+    { "src": "api/index.py", "use": "@vercel/python" }
+  ],
   "routes": [
     { "src": "/razas", "dest": "api/index.py" },
     { "src": "/", "dest": "api/index.py" }
-  ]
+  ], 
+  "devCommand": "uvicorn api.index:app --reload --port $PORT"
 }

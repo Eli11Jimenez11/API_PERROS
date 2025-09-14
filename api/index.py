@@ -5,21 +5,21 @@ import asyncpg
 import certifi
 from dotenv import load_dotenv
 
+# 🔹 Carga variables de entorno locales
+load_dotenv()
+
 app = FastAPI(title="API de Razas de Perros")
 
-load_dotenv()
 DATABASE_URL = os.environ.get("DATABASE_URL")
+ENV = os.environ.get("ENV", "development")  # "production" en Vercel
 
-# 🔹 SSL para producción
+# SSL seguro para producción
 ssl_context_prod = ssl.create_default_context(cafile=certifi.where())
 
-# 🔹 SSL para desarrollo (ignora verificación, solo local/dev)
+# SSL flexible para desarrollo local (ignora verificación)
 ssl_context_dev = ssl.create_default_context()
 ssl_context_dev.check_hostname = False
 ssl_context_dev.verify_mode = ssl.CERT_NONE
-
-# 🔹 Detecta si estamos en producción o local
-ENV = os.environ.get("ENV", "development")  # por ejemplo ENV=production en Vercel
 
 async def get_connection():
     if not DATABASE_URL:
