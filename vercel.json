@@ -6,6 +6,6 @@
   "routes": [
     { "src": "/razas", "dest": "api/index.py" },
     { "src": "/", "dest": "api/index.py" }
-  ], 
-  "devCommand": "uvicorn api.index:app --reload --port $PORT"
+  ],
+  "devCommand": "uvicorn api.index:app --reload --host 0.0.0.0 --port $PORT"
 }
