@@ -102,24 +102,14 @@ async def crear_raza(raza: Raza):
         headers = {
             "apikey": SUPABASE_KEY,
             "Authorization": f"Bearer {SUPABASE_KEY}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "Prefer": "return=representation"  # <-- obligatorio para obtener la respuesta
         }
         async with httpx.AsyncClient(timeout=10) as client:
             res = await client.post(f"{SUPABASE_URL}/rest/v1/razas_perros", headers=headers, json=raza.dict())
             if res.status_code not in [200, 201]:
                 raise HTTPException(status_code=res.status_code, detail=f"Error al crear raza: {res.text}")
-            return res.json()
-    else:
-        try:
-            conn = await get_connection()
-            row = await conn.fetchrow(
-                "INSERT INTO razas_perros (nombre, origen, tamanio, esperanza_vida) VALUES ($1, $2, $3, $4) RETURNING *",
-                raza.nombre, raza.origen, raza.tamanio, raza.esperanza_vida
-            )
-            await conn.close()
-            return dict(row)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Error al crear raza: {str(e)}")
+            return res.json()  # ahora devuelve el registro creado con id
 
 # --- Actualizar raza (PATCH opcional) ---
 @app.patch("/razas/{id}")
