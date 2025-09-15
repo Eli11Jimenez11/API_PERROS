@@ -6,6 +6,7 @@ import asyncpg
 import httpx
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+from typing import Optional
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -16,15 +17,20 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
 app = FastAPI(title="API de Razas de Perros")
-
 ssl_context_prod = ssl.create_default_context(cafile=certifi.where())
 
-# --- Modelo Pydantic para validación ---
+# --- Modelos ---
 class Raza(BaseModel):
     nombre: str
     origen: str
     tamanio: str
     esperanza_vida: int
+
+class RazaUpdate(BaseModel):
+    nombre: Optional[str] = None
+    origen: Optional[str] = None
+    tamanio: Optional[str] = None
+    esperanza_vida: Optional[int] = None
 
 # --- Conexión directa PostgreSQL (solo local) ---
 async def get_connection():
@@ -36,16 +42,15 @@ async def get_connection():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"No se pudo conectar a la DB: {str(e)}")
 
-# --- Endpoint raíz ---
+# --- Endpoints raíz ---
 @app.get("/")
 async def root():
     return {"mensaje": "API de Razas de Perros funcionando ✅"}
 
-# --- Listar razas ---
+# --- Listar todas las razas ---
 @app.get("/razas")
 async def listar_razas():
     if ENV == "production":
-        # PRODUCCIÓN: Supabase REST API
         if not SUPABASE_URL or not SUPABASE_KEY:
             raise HTTPException(status_code=500, detail="SUPABASE_URL o SUPABASE_KEY no configuradas")
         headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
@@ -58,7 +63,6 @@ async def listar_razas():
                 raise HTTPException(status_code=res.status_code, detail=f"Error al listar razas: {res.text}")
             return res.json()
     else:
-        # LOCAL: PostgreSQL directo
         try:
             conn = await get_connection()
             rows = await conn.fetch("SELECT * FROM razas_perros")
@@ -66,6 +70,30 @@ async def listar_razas():
             return [dict(r) for r in rows]
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Error al listar razas: {str(e)}")
+
+# --- Obtener raza por ID ---
+@app.get("/razas/{id}")
+async def obtener_raza(id: int):
+    if ENV == "production":
+        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+        async with httpx.AsyncClient(timeout=10) as client:
+            res = await client.get(f"{SUPABASE_URL}/rest/v1/razas_perros?id=eq.{id}", headers=headers)
+            if res.status_code != 200:
+                raise HTTPException(status_code=res.status_code, detail=f"Error al obtener raza: {res.text}")
+            data = res.json()
+            if not data:
+                raise HTTPException(status_code=404, detail="Raza no encontrada")
+            return data[0]
+    else:
+        try:
+            conn = await get_connection()
+            row = await conn.fetchrow("SELECT * FROM razas_perros WHERE id=$1", id)
+            await conn.close()
+            if row:
+                return dict(row)
+            raise HTTPException(status_code=404, detail="Raza no encontrada")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error al obtener raza: {str(e)}")
 
 # --- Crear raza ---
 @app.post("/razas")
@@ -93,27 +121,27 @@ async def crear_raza(raza: Raza):
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Error al crear raza: {str(e)}")
 
-# --- Actualizar raza ---
+# --- Actualizar raza (PATCH opcional) ---
 @app.patch("/razas/{id}")
-async def actualizar_raza(id: int, raza: Raza):
+async def actualizar_raza(id: int, raza: RazaUpdate):
+    data = {k: v for k, v in raza.dict().items() if v is not None}
+    if not data:
+        raise HTTPException(status_code=400, detail="No hay campos para actualizar")
+
     if ENV == "production":
-        headers = {
-            "apikey": SUPABASE_KEY,
-            "Authorization": f"Bearer {SUPABASE_KEY}",
-            "Content-Type": "application/json"
-        }
+        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}", "Content-Type": "application/json"}
         async with httpx.AsyncClient(timeout=10) as client:
-            res = await client.patch(f"{SUPABASE_URL}/rest/v1/razas_perros?id=eq.{id}", headers=headers, json=raza.dict())
-            if res.status_code != 200:
+            res = await client.patch(f"{SUPABASE_URL}/rest/v1/razas_perros?id=eq.{id}", headers=headers, json=data)
+            if res.status_code not in [200, 204]:
                 raise HTTPException(status_code=res.status_code, detail=f"Error al actualizar raza: {res.text}")
-            return res.json()
+            return {"mensaje": f"Raza {id} actualizada correctamente"}
     else:
         try:
             conn = await get_connection()
-            row = await conn.fetchrow(
-                "UPDATE razas_perros SET nombre=$1, origen=$2, tamanio=$3, esperanza_vida=$4 WHERE id=$5 RETURNING *",
-                raza.nombre, raza.origen, raza.tamanio, raza.esperanza_vida, id
-            )
+            set_clause = ", ".join([f"{k}=${i+1}" for i, k in enumerate(data.keys())])
+            values = list(data.values())
+            values.append(id)
+            row = await conn.fetchrow(f"UPDATE razas_perros SET {set_clause} WHERE id=${len(values)} RETURNING *", *values)
             await conn.close()
             if row:
                 return dict(row)
@@ -128,7 +156,7 @@ async def eliminar_raza(id: int):
         headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
         async with httpx.AsyncClient(timeout=10) as client:
             res = await client.delete(f"{SUPABASE_URL}/rest/v1/razas_perros?id=eq.{id}", headers=headers)
-            if res.status_code != 200:
+            if res.status_code not in [200, 204]:
                 raise HTTPException(status_code=res.status_code, detail=f"Error al eliminar raza: {res.text}")
             return {"mensaje": f"Raza con id {id} eliminada correctamente"}
     else:
